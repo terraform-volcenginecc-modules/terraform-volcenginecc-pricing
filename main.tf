@@ -1,8 +1,27 @@
 locals {
-  gross_monthly = {
-    for key, item in var.cost_items : key => item.quantity * item.unit_price * (
-      item.unit == "hourly" ? var.monthly_hours : item.unit == "usage" ? coalesce(item.monthly_usage, 0) : 1
-    )
+  # Multiply decimal coefficients as integers, then divide only once per output.
+  # Chained fractional arithmetic can make 0.3 * 12 slightly greater than 3.6.
+  decimal_factors = {
+    for key, item in var.cost_items : key => [
+      for factor in [
+        item.quantity,
+        item.unit_price,
+        item.unit == "hourly" ? var.monthly_hours : item.unit == "usage" ? coalesce(item.monthly_usage, 0) : 1,
+        item.reserved_eligible ? var.reserved_instance_discount_rate : 0
+        ] : {
+        coefficient = tonumber(replace(tostring(factor), ".", ""))
+        scale       = length(try(split(".", tostring(factor))[1], ""))
+      }
+    ]
+  }
+  decimal_costs = {
+    for key, factors in local.decimal_factors : key => {
+      coefficient = (
+        factors[0].coefficient * factors[1].coefficient * factors[2].coefficient *
+        (tonumber("1e${factors[3].scale}") - factors[3].coefficient)
+      )
+      scale = sum([for factor in factors : factor.scale])
+    }
   }
   item_costs = {
     for key, item in var.cost_items : key => {
@@ -12,12 +31,17 @@ locals {
       quantity         = item.quantity
       monthly_usage    = item.monthly_usage
       discount_rate    = item.reserved_eligible ? var.reserved_instance_discount_rate : 0
-      monthly_cost     = local.gross_monthly[key] * (item.reserved_eligible ? 1 - var.reserved_instance_discount_rate : 1)
-      annual_cost      = local.gross_monthly[key] * (item.reserved_eligible ? 1 - var.reserved_instance_discount_rate : 1) * 12
+      monthly_cost     = local.decimal_costs[key].coefficient / tonumber("1e${local.decimal_costs[key].scale}")
+      annual_cost      = (local.decimal_costs[key].coefficient * 12) / tonumber("1e${local.decimal_costs[key].scale}")
     }
   }
-  monthly_cost = sum(concat([0], [for item in values(local.item_costs) : item.monthly_cost]))
-  annual_cost  = local.monthly_cost * 12
+  total_scale = max(concat([0], [for cost in values(local.decimal_costs) : cost.scale])...)
+  total_coefficient = sum(concat([0], [
+    for cost in values(local.decimal_costs) :
+    cost.coefficient * tonumber("1e${local.total_scale - cost.scale}")
+  ]))
+  monthly_cost = local.total_coefficient / tonumber("1e${local.total_scale}")
+  annual_cost  = (local.total_coefficient * 12) / tonumber("1e${local.total_scale}")
   budgets = {
     monthly = {
       threshold = var.budget_thresholds.monthly

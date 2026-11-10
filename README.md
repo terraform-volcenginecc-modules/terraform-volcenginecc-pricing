@@ -97,11 +97,13 @@ Root inputs are nonnullable; explicit null selects the default where a default e
 
 Outputs contain no credentials. Keys/addresses and negotiated prices may still be commercially sensitive; control access to exported plans and reports. CSV/text monetary values use two decimals for presentation; budget comparisons use unrounded numbers. Read `report` or `alert_payload` for complete budget details regardless of output_format.
 
+Cost arithmetic uses decimal integer coefficients before conversion to Terraform numbers, avoiding chained fractional errors at equal-budget boundaries. The adapter and CI event writer preserve JSON decimal numbers without converting them to binary floats. Precision remains subject to Terraform's numeric limits.
+
 ## 9. Notes
 
 Budget equality is within budget. Null budgets do not alert; a zero budget alerts on any positive forecast. Discounts apply only where `reserved_eligible=true`; avoid applying them to already discounted quotes. Annual estimates assume twelve identical representative months. Taxes, one-time/upfront reservation charges, exchange rates, tiered pricing, free quotas, time-varying usage and real reservation eligibility are not inferred. Supply separately calculated effective rates/usage where appropriate.
 
-The adapter accepts plan JSON format 1.x, traverses nested planned modules and matches exact managed instance addresses (including count/for_each indexes). Every managed resource must have at least one component or a documented exclusion in `ignored_resources`. It rejects stale mappings, missing rates/quantities, incomplete plans and unknown quantities. Data sources are not chargeable objects. Mapping completeness proves address coverage, not that the caller included every billing dimension or selected the correct SKU; verify prices and all dimensions against the quote.
+The adapter accepts plan JSON format 1.x with `planned_values`, including empty plans that omit `resource_changes`, traverses nested planned modules and matches exact managed instance addresses (including count/for_each indexes). Every managed resource must have at least one component or a documented exclusion in `ignored_resources`. It rejects stale mappings, missing rates/quantities, incomplete plans and unknown quantities. Data sources are not chargeable objects. Mapping completeness proves address coverage, not that the caller included every billing dimension or selected the correct SKU; verify prices and all dimensions against the quote.
 
 There is no create/update/replacement/import behavior. Key changes only change output rows. Forecast evaluation is offline; notification delivery belongs to the caller, and `budget_gate.py` emits a generic JSON event without sending it. Registry publication remains unverified. Read-only online spot price snapshots were used to verify forecast arithmetic; authoritative currency, real reservation discounts and official bill comparison were not verified.
 
