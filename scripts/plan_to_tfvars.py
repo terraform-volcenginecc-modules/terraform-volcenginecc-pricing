@@ -4,13 +4,19 @@ import argparse
 import json
 import math
 import sys
+from decimal import Decimal
 from pathlib import Path
+
+import decimal_json
 
 
 def number(value, field):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         raise ValueError(f"{field} must be a known number")
-    if not math.isfinite(value) or value < 0:
+    finite = value.is_finite() if isinstance(value, Decimal) else (
+        math.isfinite(value) if isinstance(value, float) else True
+    )
+    if not finite or value < 0:
         raise ValueError(f"{field} must be finite and nonnegative")
     return value
 
@@ -26,7 +32,7 @@ def walk(module):
 def convert(plan, catalog):
     if not str(plan.get("format_version", "")).startswith("1."):
         raise ValueError("Expected Terraform plan JSON format_version 1.x")
-    if "planned_values" not in plan or "resource_changes" not in plan:
+    if "planned_values" not in plan:
         raise ValueError("Expected saved plan JSON, not state JSON")
     if plan.get("errored") or plan.get("complete") is False:
         raise ValueError("Errored or incomplete plans cannot be estimated")
@@ -48,7 +54,7 @@ def convert(plan, catalog):
     if len(resources) != len(planned_resources):
         raise ValueError("Duplicate managed resource addresses in planned_values")
     changes = {
-        r["address"]: r for r in plan["resource_changes"] if r.get("mode") == "managed"
+        r["address"]: r for r in plan.get("resource_changes", []) if r.get("mode") == "managed"
     }
     # A managed after-object missing from planned_values must never disappear silently.
     if any(r["change"].get("actions") != ["delete"] and addr not in resources for addr, r in changes.items()):
@@ -110,8 +116,8 @@ def main():
     parser.add_argument("--catalog", required=True, type=Path)
     args = parser.parse_args()
     try:
-        result = convert(json.loads(args.plan.read_text()), json.loads(args.catalog.read_text()))
-        print(json.dumps(result, indent=2, allow_nan=False))
+        result = convert(decimal_json.loads(args.plan.read_text()), decimal_json.loads(args.catalog.read_text()))
+        print(decimal_json.dumps(result))
         return 0
     except (ValueError, KeyError, TypeError, IndexError, AttributeError, OSError) as exc:
         print(f"Cost mapping failed: {exc}", file=sys.stderr)
